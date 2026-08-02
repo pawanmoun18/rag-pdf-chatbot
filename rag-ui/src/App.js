@@ -11,6 +11,7 @@ function App() {
   const [uploadMsg, setUploadMsg] = useState("");
   const [uploadedFiles, setUploadedFiles] = useState([]);
   const [chatHistory, setChatHistory] = useState([]);
+  const [sessionId, setSessionId] = useState(""); // ✅ NEW
 
   const uploadPDF = async (e) => {
     const files = Array.from(e.target.files);
@@ -31,6 +32,7 @@ function App() {
       const data = await res.json();
       setUploadMsg(data.message || data.error);
       setUploadedFiles((prev) => [...prev, ...files.map((f) => f.name)]);
+      if (data.sessionId) setSessionId(data.sessionId); // ✅ NEW
     } catch (err) {
       setUploadMsg("❌ Error uploading PDF");
     }
@@ -51,7 +53,10 @@ function App() {
       const res = await fetch(`${BACKEND_URL}/query`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: userQuestion }),
+        body: JSON.stringify({ 
+          question: userQuestion,
+          sessionId: sessionId // ✅ NEW
+        }),
       });
 
       const data = await res.json();
@@ -176,7 +181,10 @@ function App() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
               {sources.map((s) => (
                 <div key={s.id} className="bg-slate-800 rounded-lg p-2">
-                  <p className="text-xs font-semibold text-blue-400 mb-1">Chunk {s.id}</p>
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-xs font-semibold text-blue-400">Chunk {s.id}</p>
+                    <p className="text-xs text-slate-500">📄 {s.source} · p.{s.page}</p>
+                  </div>
                   <p className="text-xs text-slate-400">{s.text}</p>
                 </div>
               ))}

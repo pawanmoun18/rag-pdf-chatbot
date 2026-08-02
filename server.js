@@ -17,21 +17,21 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Multer for multiple PDF uploads
 const upload = multer({ dest: "uploads/" });
-
-// Groq client
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-// Embeddings
 const embeddings = new HuggingFaceInferenceEmbeddings({
     apiKey: process.env.HUGGINGFACE_API_KEY,
     model: "sentence-transformers/all-MiniLM-L6-v2",
 });
 
-// Pinecone
 const pinecone = new Pinecone({ apiKey: process.env.PINECONE_API_KEY });
 const index = pinecone.Index(process.env.PINECONE_INDEX_NAME);
+
+// ✅ Ping route
+app.get("/ping", (req, res) => {
+    res.json({ status: "awake" });
+});
 
 // ✅ Upload + Index Multiple PDFs
 app.post("/upload", upload.array("pdf", 10), async (req, res) => {
@@ -40,13 +40,16 @@ app.post("/upload", upload.array("pdf", 10), async (req, res) => {
             return res.status(400).json({ error: "No files uploaded" });
         }
 
+        // Generate unique session ID for this upload
+        const sessionId = Date.now().toString();
+
         let allDocs = [];
 
         for (const file of req.files) {
             const loader = new PDFLoader(file.path);
             const docs = await loader.load();
             allDocs = allDocs.concat(docs);
-            fs.unlinkSync(file.path); // delete temp file after loading
+            fs.unlinkSync(file.path);
         }
 
         const splitter = new RecursiveCharacterTextSplitter({
@@ -56,12 +59,15 @@ app.post("/upload", upload.array("pdf", 10), async (req, res) => {
 
         const chunks = await splitter.splitDocuments(allDocs);
 
+        // ✅ Store in unique namespace — isolates each upload session
         await PineconeStore.fromDocuments(chunks, embeddings, {
             pineconeIndex: index,
+            namespace: sessionId,
         });
 
         res.json({ 
-            message: `✅ ${req.files.length} PDF(s) indexed successfully! ${chunks.length} chunks uploaded.` 
+            message: `✅ ${req.files.length} PDF(s) indexed successfully! ${chunks.length} chunks uploaded.`,
+            sessionId: sessionId
         });
 
     } catch (err) {
@@ -73,15 +79,20 @@ app.post("/upload", upload.array("pdf", 10), async (req, res) => {
 // ✅ Query Route
 app.post("/query", async (req, res) => {
     try {
-        const question = req.body.question;
+        const { question, sessionId } = req.body;
 
         if (!question) {
             return res.status(400).json({ error: "Question is required" });
         }
 
-        // Retrieve top 5 chunks from Pinecone
+        if (!sessionId) {
+            return res.status(400).json({ error: "Please upload a PDF first." });
+        }
+
+        // ✅ Search only in the session namespace
         const vectorStore = await PineconeStore.fromExistingIndex(embeddings, {
             pineconeIndex: index,
+            namespace: sessionId,
         });
 
         const docs = await vectorStore.similaritySearch(question, 5);
@@ -93,10 +104,8 @@ app.post("/query", async (req, res) => {
             });
         }
 
-        // Build context
         const context = docs.map(d => d.pageContent).join("\n\n");
 
-        // Send to Groq LLM
         const completion = await groq.chat.completions.create({
             model: "llama-3.1-8b-instant",
             messages: [
@@ -116,10 +125,11 @@ ${context}`
 
         const answer = completion.choices[0].message.content;
 
-        // Sources
         const sources = docs.map((d, i) => ({
             id: i + 1,
-            text: d.pageContent.substring(0, 150) + "..."
+            text: d.pageContent.substring(0, 150) + "...",
+            source: d.metadata?.source?.split("/").pop() || "PDF",
+            page: d.metadata?.loc?.pageNumber || "N/A"
         }));
 
         res.json({ answer, sources });
@@ -130,6 +140,7 @@ ${context}`
     }
 });
 
-app.listen(3000, () => {
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
     console.log("🚀 Server running on http://localhost:3000");
 });
