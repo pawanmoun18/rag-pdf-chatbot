@@ -3,7 +3,7 @@ import cors from "cors";
 import * as dotenv from "dotenv";
 import { Pinecone } from "@pinecone-database/pinecone";
 import { PineconeStore } from "@langchain/pinecone";
-import { HuggingFaceInferenceEmbeddings } from "@langchain/community/embeddings/hf";
+import { HuggingFaceTransformersEmbeddings } from "@langchain/community/embeddings/hf_transformers";
 import Groq from "groq-sdk";
 import multer from "multer";
 import { PDFLoader } from "@langchain/community/document_loaders/fs/pdf";
@@ -22,9 +22,8 @@ app.use(express.json({ limit: "10mb" }));
 const upload = multer({ dest: "uploads/" });
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-const embeddings = new HuggingFaceInferenceEmbeddings({
-    apiKey: process.env.HUGGINGFACE_API_KEY,
-    model: "sentence-transformers/all-MiniLM-L6-v2",
+const embeddings = new HuggingFaceTransformersEmbeddings({
+    model: "Xenova/all-MiniLM-L6-v2",
 });
 
 const pinecone = new Pinecone({ apiKey: process.env.PINECONE_API_KEY });
@@ -200,7 +199,8 @@ app.post("/query", async (req, res) => {
         const context = docs.map(d => d.pageContent).join("\n\n");
 
         const completion = await groq.chat.completions.create({
-            model: "llama-3.1-8b-instant",
+            // model: "llama-3.1-8b-instant",
+            model: "openai/gpt-oss-20b",
             messages: [
                 {
                     role: "system",
